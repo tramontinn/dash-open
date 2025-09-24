@@ -1,0 +1,784 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dashboard OpenFinance — Tickets & PRBs</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- PapaParse (CSV) -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root { color-scheme: light dark; }
+    .card { border-radius: 1rem; box-shadow: 0 8px 20px rgba(0,0,0,.08); padding: 1rem; background: white; }
+    .pill { display:inline-flex; align-items:center; gap:.5rem; padding:.35rem .7rem; border-radius:9999px; font-size:.8rem; border:1px solid rgba(0,0,0,.08); }
+    .badge { padding:.2rem .5rem; border-radius:.5rem; font-size:.75rem; white-space:nowrap; }
+    .badge-green { background: rgba(16,185,129,.15); color: rgb(5,150,105); }
+    .badge-amber { background: rgba(245,158,11,.15); color: rgb(217,119,6); }
+    .badge-red { background: rgba(239,68,68,.15); color: rgb(220,38,38); }
+    .badge-sky { background: rgba(56,189,248,.15); color: rgb(14,165,233); }
+    .tab { border:1px solid rgba(0,0,0,.08); }
+    .tab-active { background: #111827; color: #fff; border-color: #111827; }
+    .hidden { display: none; }
+    .nowrap { white-space: nowrap; }
+    .tabnums { font-variant-numeric: tabular-nums; }
+
+    /* Lista de tickets mais compacta */
+    #tblTickets { font-size: 12px; width:100%; border-collapse: separate; border-spacing: 0; }
+    #tblTickets th, #tblTickets td { padding: 6px 8px; text-align: left; border-bottom: 1px solid rgba(0,0,0,.06); }
+    #tblTickets thead th { position: sticky; top: 0; background: #fff; z-index: 1; }
+  </style>
+</head>
+<body class="bg-zinc-50 text-zinc-800 min-h-screen">
+  <header class="max-w-7xl mx-auto px-4 py-6">
+    <div class="flex items-center justify-between gap-4">
+      <h1 class="text-2xl font-semibold">Dashboard OpenFinance — Tickets & PRBs</h1>
+      <div class="flex items-center gap-2">
+        <label class="pill cursor-pointer" title="Carregar CSV de tickets (export do ServiceDesk)">
+          <i data-lucide="upload"></i>
+          <input id="fileTickets" type="file" accept=".csv,.tsv,.txt" class="hidden" />
+          <span>Tickets CSV</span>
+        </label>
+        <label class="pill cursor-pointer" title="Carregar CSV de vínculos PRB (ticket_id, prb_id, data_previsao_correcao)">
+          <i data-lucide="link"></i>
+          <input id="fileVinculos" type="file" accept=".csv,.tsv,.txt" class="hidden" />
+          <span>Vínculos PRB CSV</span>
+        </label>
+        <button id="btnModeloVinculos" class="pill" title="Baixar modelo de vínculos">Modelo Vínculos</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 pb-24">
+    <!-- Tabs / Segmentos -->
+    <section class="flex flex-wrap gap-2 mb-4">
+      <button class="pill tab tab-active" data-tab="tickets_todos">Todos (Tickets)</button>
+      <button class="pill tab" data-tab="tickets_suporte">Suporte (sem PRB)</button>
+      <button class="pill tab" data-tab="tickets_produtos">Produtos (com PRB)</button>
+      <button class="pill tab" data-tab="tickets_produtos_com_data">Produtos (com data)</button>
+      <button class="pill tab" data-tab="tickets_produtos_sem_data">Produtos (sem data)</button>
+      <button class="pill tab" data-tab="prbs">PRBs</button>
+    </section>
+
+    <!-- Filtros  -->
+    <section class="grid md:grid-cols-2 gap-4 mb-6">
+  <div class="card" id="cardStatus">
+    <div class="text-xs uppercase tracking-wide opacity-70">Status</div>
+    <select id="fStatus" class="w-full mt-2 rounded-xl border border-zinc-300 p-2">
+      <option value="">Todos</option>
+    </select>
+  </div>
+
+  <div class="card" id="cardEquipe">
+    <div class="text-xs uppercase tracking-wide opacity-70">Equipe atribuída</div>
+    <select id="fEquipe" class="w-full mt-2 rounded-xl border border-zinc-300 p-2">
+      <option value="">Todas</option>
+    </select>
+  </div>
+</section>
+
+</div>
+
+    <!-- KPIs Tickets -->
+    <section id="kpisTickets" class="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div class="card"><div class="text-sm opacity-70">Tickets carregados</div><div id="kpiTotal" class="text-3xl font-semibold">—</div></div>
+      <div class="card"><div class="text-sm opacity-70">Com PRB</div><div id="kpiComPRB" class="text-3xl font-semibold">—</div></div>
+      <div class="card"><div class="text-sm opacity-70">Sem PRB</div><div id="kpiSemPRB" class="text-3xl font-semibold">—</div></div>
+      <div class="card"><div class="text-sm opacity-70">Prev. correção hoje</div><div id="kpiPrevHoje" class="text-3xl font-semibold">—</div></div>
+    </section>
+
+    <!-- KPIs PRBs -->
+    <section id="kpisPRB" class="grid md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6 hidden">
+      <div class="card"><div class="text-sm opacity-70">PRBs distintos</div><div id="kpiPRBTotal" class="text-3xl font-semibold">—</div></div>
+      <div class="card"><div class="text-sm opacity-70">Sem data</div><div id="kpiPRBSemData" class="text-3xl font-semibold">—</div></div>
+      <div class="card"><div class="text-sm opacity-70">Vencem hoje</div><div id="kpiPRBHoje" class="text-3xl font-semibold">—</div></div>
+      <div class="card"><div class="text-sm opacity-70">Estourados</div><div id="kpiPRBEst" class="text-3xl font-semibold">—</div></div>
+      <div class="card"><div class="text-sm opacity-70">Estouram em 7 dias</div><div id="kpiPRB7" class="text-3xl font-semibold">—</div></div>
+    </section>
+
+    <!-- Gráficos Tickets (altura maior) -->
+    <section id="chartsTickets" class="grid lg:grid-cols-3 gap-4 mb-6">
+      <div class="card" style="min-height:380px;">
+  <div class="text-sm opacity-70 mb-2">Tickets por Status</div>
+  <canvas id="chartStatus" height="280"></canvas>
+</div>
+
+      <div class="card" style="min-height:380px;">
+  <div class="text-sm opacity-70 mb-2">Tickets por <span id="lblGroup">Categoria</span></div>
+  <canvas id="chartGrupo" height="280"></canvas>
+</div>
+
+      <div class="card" style="min-height:380px;">
+  <div class="text-sm opacity-70 mb-2">Top PRBs por impacto (qtd. tickets)</div>
+  <canvas id="chartPRBImpacto" height="280"></canvas>
+</div>
+
+    </section>
+
+    <!-- Tabela Tickets -->
+    <section id="secTickets" class="card mb-6">
+      <div class="flex items-center justify-between mb-3">
+        <div class="text-sm opacity-70">Tickets</div>
+        <div class="flex items-center gap-2">
+          <button id="btnExportFiltrado" class="pill" title="Exportar CSV (visão atual)"><i data-lucide="download"></i><span>Exportar filtrado</span></button>
+          <button id="btnVerPRBs" class="pill" title="Ir para visão de PRBs"><i data-lucide="list"></i><span>Ver PRBs</span></button>
+        </div>
+      </div>
+      <div class="overflow-auto"><table id="tblTickets"></table></div>
+    </section>
+
+    <!-- Tabela PRBs (agregado) -->
+    <section id="secPRBs" class="card mb-6 hidden">
+      <div class="flex items-center justify-between mb-3">
+        <div class="text-sm opacity-70">PRBs agregados</div>
+        <div class="flex items-center gap-2">
+          <button id="btnExportPRB" class="pill" title="Exportar CSV de PRBs"><i data-lucide="download"></i><span>Exportar PRBs</span></button>
+          <button id="btnVerTickets" class="pill" title="Voltar para tickets"><i data-lucide="list"></i><span>Ver Tickets</span></button>
+        </div>
+      </div>
+      <div class="overflow-auto"><table id="tblPRB"></table></div>
+    </section>
+
+
+  </main>
+
+  <script>
+    // ======= Estado =======
+    const state = {
+      rawTickets: [],      // CSV ServiceDesk
+      tickets: [],         // normalizados + vínculo PRB
+      rawLinks: [],        // CSV vínculos
+      prbIndex: new Map(), // prb_id -> { date, tickets:Set, datesFound:Set }
+      inconsistencias: [],
+      // Tabelas & Gráficos
+      dtTickets: null, dtPRB: null, dtInc: null, charts: {},
+      // Aba atual
+      currentTab: 'tickets_todos',
+      selectedPRB: null,
+      // Mapeamento p/ CSV (será ajustado pelos listeners)
+      mapping: {
+        ticket_id: '#',
+        data_abertura: 'Data de solicitação',
+        prazo_sla: 'Prazo de SLA',
+        status: 'Status',
+        categoria: 'Categoria',
+        subcategoria: 'Subcategoria',
+        cat3: 'Categoria de terceiro nível',
+        requisitante: 'Instituição Requerente',
+        especialista: 'Especialista atribuído',
+      }
+    };
+
+    // ======= Utils =======
+    const $ = s => document.querySelector(s);
+    const $$ = s => Array.from(document.querySelectorAll(s));
+    function parseDateIsoLike(v){
+      if(v==null) return null;
+      const s=(''+v).trim(); if(!s) return null;
+      let m=s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+      if(m) return `${m[3]}-${m[2]}-${m[1]}`;
+      m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if(m) return `${m[1]}-${m[2]}-${m[3]}`;
+      return null;
+    }
+    function todayIso(){ const d=new Date(); const mm=String(d.getMonth()+1).padStart(2,'0'); const dd=String(d.getDate()).padStart(2,'0'); return `${d.getFullYear()}-${mm}-${dd}`; }
+    function diffDays(a,b){ const da=new Date(a+'T00:00:00'), db=new Date(b+'T00:00:00'); return Math.round((da-db)/(1000*60*60*24)); }
+    function toCSV(rows, headers){ const h=headers||Object.keys(rows[0]||{}); const esc=v=>'"'+String(v??'').replaceAll('"','""')+'"'; const lines=[h.join(',')].concat(rows.map(r=>h.map(k=>esc(r[k])).join(','))); return lines.join('\n'); }
+    function download(name,text){ const blob=new Blob([text],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(url),500); }
+
+    // Helpers de encoding/normalização
+    function decodeFileText(file, cb){
+      const r = new FileReader();
+      r.onload = () => {
+        const buf = new Uint8Array(r.result);
+        let text = new TextDecoder('utf-8', {fatal:false}).decode(buf);
+        if (/[ÃÂ]|�/.test(text)) {
+          try { text = new TextDecoder('iso-8859-1').decode(buf); } catch(_) {}
+        }
+        cb(text);
+      };
+      r.readAsArrayBuffer(file);
+    }
+    function _normKey(s){
+      return String(s||'')
+        .replace(/^\uFEFF/,'').replace(/\u00A0/g,' ')
+        .toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+        .replace(/\s+/g,' ')
+        .trim();
+    }
+
+    // ======= Vínculos & PRBs =======
+    function buildPRBIndex(linkRows){
+  const prbIndex = new Map();
+  const byTicket = new Map();
+
+  for (const r of linkRows){
+    const t = (r.ticket_id || r.TICKET_ID || '').toString().trim();
+    const p = (r.prb_id    || r.PRB_ID    || '').toString().trim();
+    const d = parseDateIsoLike(r.data_previsao_correcao || r.previsao || r.data || '');
+
+    // tolerante a nomes: owner_produto, owner, equipe, time, squad
+    const ownerRaw =
+      r.owner_produto ?? r.owner ?? r.equipe ?? r.time ?? r.squad ?? r.OWNER ?? r.EQUIPE ?? r.TIME ?? r.SQUAD ?? '';
+    const owner = String(ownerRaw || '').trim();
+
+    if(!t || !p) continue;
+
+    // por ticket (usaremos no normalize)
+    byTicket.set(t, { prb_id: p, date: d, owner_produto: owner || '' });
+
+    // por PRB (para agregados e consistência)
+    if(!prbIndex.has(p)) {
+      prbIndex.set(p, { date: null, tickets: new Set(), datesFound: new Set(), ownersFound: new Set(), owner: '' });
+    }
+    const node = prbIndex.get(p);
+    node.tickets.add(t);
+    if (d) node.datesFound.add(d);
+    if (owner) node.ownersFound.add(owner);
+  }
+
+  // data “oficial” do PRB = mais recente; owner “oficial” = único ou “Vários” se houver conflito
+  const inconsistencias = [];
+  for (const [p, node] of prbIndex.entries()){
+    if (node.datesFound.size > 1){
+      const arr=[...node.datesFound].sort();
+      node.date = arr[arr.length-1];
+      inconsistencias.push({ prb_id:p, datas:arr.join(' | ') });
+    } else {
+      node.date = node.datesFound.values().next().value || null;
+    }
+
+    if (node.ownersFound.size > 1){
+      node.owner = 'Vários';
+      // se quiser, registre essa inconsistência também:
+      // inconsistencias.push({ prb_id:p, owners:[...node.ownersFound].join(' | ') });
+    } else {
+      node.owner = node.ownersFound.values().next().value || '';
+    }
+  }
+
+  return { prbIndex, byTicket, inconsistencias };
+}
+
+
+    function normalizeTickets(rows, map, byTicket){
+  const out = [];
+  for (const r of rows) {
+    // --- Prazo de SLA: lê a coluna indicada no mapping e formata se for data ---
+    const rawSla = map.prazo_sla ? r[map.prazo_sla] : undefined;
+    let prazoSlaFmt = '';
+    if (rawSla != null && String(rawSla).trim() !== '') {
+      const iso = parseDateIsoLike(rawSla);    // tenta converter "dd/mm/aaaa" → "aaaa-mm-dd"
+      prazoSlaFmt = iso || String(rawSla).trim(); // se não reconhecer como data, mantém texto original
+    }
+
+    const t = {
+      ticket_id:      (r[map.ticket_id]      ?? '').toString().trim(),
+      data_abertura:  parseDateIsoLike(r[map.data_abertura]) || '',
+      status:         (r[map.status]         ?? '').toString().trim(),
+      categoria:      (r[map.categoria]      ?? '').toString().trim(),
+      subcategoria:   (r[map.subcategoria]   ?? '').toString().trim(),
+      cat3:           (r[map.cat3]           ?? '').toString().trim(),
+      requisitante:   (r[map.requisitante]   ?? '').toString().trim(),
+      especialista:   (r[map.especialista]   ?? '').toString().trim(),
+
+      //  novo campo populado a partir do CSV:
+      prazo_sla:      prazoSlaFmt,
+
+      // campos de vínculo PRB (preenchidos depois, se houver)
+      prb_id: '',
+      data_previsao_correcao: '',
+      owner: 'Suporte'
+    };
+
+    // vínculo PRB (se existir no byTicket, vem da planilha de vínculos)
+    const link = byTicket.get(t.ticket_id);
+if (link) {
+  t.prb_id = link.prb_id;
+  // Owner passa a ser Produtos quando há PRB
+  t.owner = 'Produtos';
+  // Time de produtos vem do CSV de vínculos (ou, em último caso, do índice de PRB)
+  t.owner_produto = link.owner_produto || (state.prbIndex.get(link.prb_id)?.owner || '');
+}
+
+
+    out.push(t);
+  }
+  return out;
+}
+
+    
+    function hydrateTicketsWithPRBDate(tickets, prbIndex){
+      for(const t of tickets){ if(t.prb_id){ const node=prbIndex.get(t.prb_id); t.data_previsao_correcao=node?(node.date||''):''; } }
+      return tickets;
+    }
+
+    // ======= Filtros =======
+    function passesFilters(t){
+  const ini    = $('#fDataIni')?.value || null;
+  const fim    = $('#fDataFim')?.value || null;
+  const st     = $('#fStatus')?.value || '';
+  const equipe = $('#fEquipe')?.value || '';
+
+  if (ini && (!t.data_abertura || t.data_abertura < ini)) return false;
+  if (fim && (!t.data_abertura || t.data_abertura > fim)) return false;
+  if (st && t.status !== st) return false;
+
+  // Lógica das abas (igual já era feito)
+  switch (state.currentTab) {
+    case 'tickets_suporte':
+      if (t.owner !== 'Suporte') return false;
+      break;
+    case 'tickets_produtos':
+      if (t.owner !== 'Produtos') return false;
+      break;
+    case 'tickets_produtos_com_data':
+      if (!(t.owner === 'Produtos' && t.data_previsao_correcao)) return false;
+      break;
+    case 'tickets_produtos_sem_data':
+      if (!(t.owner === 'Produtos' && !t.data_previsao_correcao)) return false;
+      break;
+  }
+
+  // 🔹 Filtro de Equipe (vale para TODAS as abas)
+  if (equipe) {
+    if (equipe === 'Suporte') {
+      if (t.owner !== 'Suporte') return false;
+    } else {
+      if (!(t.owner === 'Produtos' && t.owner_produto === equipe)) return false;
+    }
+  }
+
+  return true;
+}
+
+
+    // ======= KPIs =======
+    function refreshKPIs_Tickets(){
+      const all=state.tickets.filter(passesFilters);
+      $('#kpiTotal').textContent=all.length;
+      const com=all.filter(t=>t.prb_id).length;
+      $('#kpiComPRB').textContent=com;
+      $('#kpiSemPRB').textContent=all.length-com;
+      const hoje=todayIso();
+      $('#kpiPrevHoje').textContent=all.filter(t=>t.data_previsao_correcao===hoje).length;
+    }
+    function computePRBAggregate(){
+      const tickets=state.tickets.filter(passesFilters).filter(t=>t.prb_id);
+      const map=new Map();
+      for(const t of tickets){
+        if(!map.has(t.prb_id)) map.set(t.prb_id,{prb_id:t.prb_id,qtd_tickets:0,data_previsao_correcao:'',dias_restantes:'',estado:''});
+        const node=map.get(t.prb_id); node.qtd_tickets++;
+        const prbNode=state.prbIndex.get(t.prb_id);
+        const d=prbNode?prbNode.date:null; node.data_previsao_correcao=d||'';
+        if(d){ const dd=diffDays(d,todayIso()); node.dias_restantes=dd; node.estado=dd<0?'Estourado': dd===0?'Vence hoje': (dd<=7?'Estoura em 7 dias':'Dentro do prazo'); }
+        else { node.estado='Sem data'; }
+      }
+      return [...map.values()].sort((a,b)=>{
+        const rank=x=>({'Estourado':0,'Vence hoje':1,'Estoura em 7 dias':2,'Sem data':3,'Dentro do prazo':4}[x]??9);
+        const r=rank(a.estado)-rank(b.estado); if(r!==0) return r;
+        return (b.qtd_tickets||0)-(a.qtd_tickets||0);
+      });
+    }
+    function refreshKPIs_PRB(){
+      const agg=computePRBAggregate();
+      $('#kpiPRBTotal').textContent=agg.length;
+      $('#kpiPRBSemData').textContent=agg.filter(x=>x.estado==='Sem data').length;
+      $('#kpiPRBHoje').textContent=agg.filter(x=>x.estado==='Vence hoje').length;
+      $('#kpiPRBEst').textContent=agg.filter(x=>x.estado==='Estourado').length;
+      $('#kpiPRB7').textContent=agg.filter(x=>x.estado==='Estoura em 7 dias').length;
+    }
+
+    // ======= Gráficos =======
+    function groupCount(arr, key){ const m=new Map(); for(const r of arr){ const k=r[key]||'—'; m.set(k,(m.get(k)||0)+1);} return {labels:[...m.keys()], values:[...m.values()]}; }
+    function refreshCharts(){
+  const data = state.tickets.filter(passesFilters);
+
+  // ===== helpers locais =====
+  // conta ocorrências por chave (retorna {labels, values})
+  const groupCountLocal = (arr, key) => {
+    const m = new Map();
+    for (const r of arr) {
+      const k = r[key] || '—';
+      m.set(k, (m.get(k) || 0) + 1);
+    }
+    return { labels: [...m.keys()], values: [...m.values()] };
+  };
+
+  // ordena pares desc com proteção
+  function sortedCounts(src){
+    const labels = Array.isArray(src?.labels) ? src.labels.slice() : [];
+    const values = Array.isArray(src?.values) ? src.values.slice() : [];
+    const pairs  = labels.map((l,i)=>({ l, v: Number(values[i]) || 0 }));
+    pairs.sort((a,b)=> b.v - a.v);
+    return { labels: pairs.map(p=>p.l), values: pairs.map(p=>p.v) };
+  }
+
+  // top PRBs (máx 10)
+  const topPRBsEntries = (() => {
+    const m = new Map();
+    for (const t of data) { if (!t.prb_id) continue; m.set(t.prb_id, (m.get(t.prb_id) || 0) + 1); }
+    return [...m.entries()].sort((a,b)=>b[1]-a[1]).slice(0,10);
+  })();
+
+  // ===== prepara datasets (ordenados) =====
+  const byStatus    = sortedCounts(groupCountLocal(data,'status'));
+  const byCategoria = sortedCounts(groupCountLocal(data,'categoria'));
+  const prb         = { labels: topPRBsEntries.map(x=>x[0]), values: topPRBsEntries.map(x=>Number(x[1])||0) };
+
+  // ===== builder donut + legenda embaixo alinhada à esquerda =====
+  const palette = (n) => {
+    const base = [
+      '#ef4444','#f59e0b','#10b981','#60a5fa','#8b5cf6',
+      '#ec4899','#22c55e','#06b6d4','#f97316','#84cc16',
+      '#a855f7','#14b8a6'
+    ];
+    return Array.from({length:n},(_,i)=> base[i % base.length]);
+  };
+
+  const centerTextPlugin = {
+    id: 'centerText',
+    afterDraw(chart) {
+      const meta = chart.getDatasetMeta(0);
+      const first = meta?.data?.[0]; if (!first) return;
+      const {x,y} = first;
+      const total = (chart.config.data.datasets?.[0]?.data || []).reduce((a,b)=>a+(+b||0),0);
+      const ctx = chart.ctx;
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#374151';
+      ctx.font = '600 14px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+      ctx.fillText(String(total), x, y);
+      ctx.restore();
+    }
+  };
+
+  const buildDonut = (labels, values) => ({
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: palette(labels.length),
+        borderWidth: 0
+      }]
+    },
+    options: {
+      responsive: false,    // evita loop de redimensionamento
+      cutout: '60%',
+      layout: { padding: { top: 6, right: 6, bottom: 6, left: 6 } },
+      plugins: {
+       legend: {
+  position: 'bottom',   // mantém embaixo
+  align: 'start',       // alinhada à esquerda
+  labels: {
+    usePointStyle: true,
+    boxWidth: 10,
+    boxHeight: 10,
+    padding: 8,
+    font: { size: 11 }, // fonte um pouco menor → mais itens cabem
+    color: '#374151'
+  }
+},
+
+        tooltip: {
+          callbacks: {
+            label: (ctx) => {
+              const total = (ctx.dataset?.data || []).reduce((a,b)=>a+(+b||0),0);
+              const v = +ctx.parsed || 0;
+              const pct = total ? (v/total*100).toFixed(1) : '0.0';
+              return `${ctx.label}: ${v} (${pct}%)`;
+            }
+          }
+        }
+      }
+    },
+    plugins: [centerTextPlugin]
+  });
+
+  // rótulo do gráfico 2
+  const lbl = $('#lblGroup'); if (lbl) lbl.textContent = 'Categoria';
+
+  // destruir instâncias anteriores (se existirem)
+  for (const k of ['status','grupo','prb']) {
+    try { state.charts[k]?.destroy(); } catch(_) {}
+    state.charts[k] = null;
+  }
+
+  // criar gráficos (somente se houver dados)
+  const c1 = $('#chartStatus');
+  const c2 = $('#chartGrupo');
+  const c3 = $('#chartPRBImpacto');
+
+  if (c1 && byStatus.labels.length)    state.charts.status = new Chart(c1, buildDonut(byStatus.labels,    byStatus.values));
+  if (c2 && byCategoria.labels.length) state.charts.grupo  = new Chart(c2, buildDonut(byCategoria.labels, byCategoria.values));
+  if (c3 && prb.labels.length)         state.charts.prb    = new Chart(c3, buildDonut(prb.labels,         prb.values));
+}
+
+
+
+    // ======= Tabelas (vanilla) =======
+    function renderTicketsTable(){
+      const cols = [
+        {key:'ticket_id', title:'Ticket'},
+        {key:'data_abertura', title:'Data Abertura'},
+      // key logica de SLA  
+        { key:'prazo_sla', title:'Prazo SLA', render: (d) => {
+    if (!d) return '<span class="badge">—</span>';
+    // aceita ISO (aaaa-mm-dd) ou dd/mm/aaaa
+    const iso = parseDateIsoLike(d) || d;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+      // não reconheceu como data -> mostra o texto puro, sem quebrar
+      return `<span class="nowrap tabnums">${String(d)}</span>`;
+    }
+    const hoje = todayIso();
+    const dias = diffDays(iso, hoje);   // positivo = ainda falta; negativo = estourado
+    const cls  = dias < 0 ? 'badge-red' : 'badge-green';
+    const hint = dias < 0 ? `SLA estourado há ${Math.abs(dias)} dia(s)` : `Dentro do prazo (${dias} dia(s) restante(s))`;
+    return `<span class="badge ${cls} nowrap tabnums" title="${hint}">${iso}</span>`;
+}},
+
+        {key:'status', title:'Status'},
+        {key:'categoria', title:'Categoria'},
+        {key:'requisitante', title:'Requisitante'},
+        {key:'prb_id', title:'PRB', render:d=> d?`<span class="badge badge-sky">${d}</span>`:'<span class="badge badge-amber">Sem PRB</span>'},
+        {key:'data_previsao_correcao', title:'Prev. Correção', render:d=> d?d:'<span class="badge">—</span>'},
+        { key:'owner', title:'Owner', render: (d, row) => {
+    if (d !== 'Produtos') return 'Suporte';
+    const team = row.owner_produto ? ` - ${row.owner_produto}` : '';
+    return `Produtos${team}`;
+}},
+
+      ];
+      const data = state.tickets.filter(passesFilters);
+
+      // helper local (conta ocorrências por chave)
+const groupCountLocal = (arr, key) => {
+  const m = new Map();
+  for (const r of arr) { const k = r[key] || '—'; m.set(k, (m.get(k) || 0) + 1); }
+  return { labels: [...m.keys()], values: [...m.values()] };
+};
+
+
+      const thead = `<thead><tr>${cols.map(c=>`<th>${c.title}</th>`).join('')}</tr></thead>`;
+      const rowsHtml = data.map(row => {
+        const tds = cols.map(c => {
+          const raw  = row[c.key] ?? '';
+          const html = c.render ? c.render(raw, row) : String(raw);
+          const title = (typeof raw === 'string' ? raw : String(raw));
+          return `<td title="${title}">${html}</td>`;
+        }).join('');
+        return `<tr>${tds}</tr>`;
+      }).join('');
+      $('#tblTickets').innerHTML = thead + `<tbody>${rowsHtml}</tbody>`;
+    }
+
+    function renderPRBTable(){
+      const data=computePRBAggregate();
+      const cols=[
+        {key:'prb_id',title:'PRB'},
+        {key:'qtd_tickets',title:'Tickets impactados'},
+        {key:'data_previsao_correcao',title:'Prev. Correção',render:d=> d?d:'<span class="badge">—</span>'},
+        {key:'dias_restantes',title:'Dias restantes',render:d=> d===''?'<span class="badge">—</span>':d},
+        {key:'estado',title:'Estado',render:d=>{ const cls=d==='Estourado'?'badge-red': d==='Vence hoje'?'badge-amber': d==='Estoura em 7 dias'?'badge-amber': d==='Sem data'?'':'badge-green'; return `<span class="badge ${cls}">${d}</span>`; }}
+      ];
+      const thead = `<thead><tr>${cols.map(c=>`<th>${c.title}</th>`).join('')}</tr></thead>`;
+      const rowsHtml = data.map(row=>{
+        const tds = cols.map(c=>{
+          const raw=row[c.key]??''; const html=c.render?c.render(raw,row):String(raw);
+          return `<td>${html}</td>`;
+        }).join('');
+        return `<tr>${tds}</tr>`;
+      }).join('');
+      $('#tblPRB').innerHTML = thead + `<tbody>${rowsHtml}</tbody>`;
+
+      // clique numa linha de PRB -> filtra tickets daquele PRB
+      $('#tblPRB').addEventListener('click',(e)=>{
+        const tr=e.target.closest('tr'); if(!tr) return;
+        const prb = tr.querySelector('td')?.textContent?.trim();
+        if(!prb) return;
+        state.currentTab='tickets_produtos';
+        state.selectedPRB=prb;
+        renderAll();
+        setTimeout(()=>{ state.selectedPRB=null; },0);
+      }, {once:true});
+    }
+
+    function renderIncTable(){
+      const data=state.inconsistencias.map(x=>({prb_id:x.prb_id,datas:x.datas}));
+      const cols=[ {key:'prb_id',title:'PRB'}, {key:'datas',title:'Datas encontradas'} ];
+      const thead = `<thead><tr>${cols.map(c=>`<th>${c.title}</th>`).join('')}</tr></thead>`;
+      const rowsHtml = data.map(row=>{
+        const tds = cols.map(c=>{
+          const raw=row[c.key]??''; return `<td>${String(raw)}</td>`;
+        }).join('');
+        return `<tr>${tds}</tr>`;
+      }).join('');
+      $('#tblInc').innerHTML = thead + `<tbody>${rowsHtml}</tbody>`;
+    }
+
+    // ======= Export =======
+    function exportTickets(){ const data=state.tickets.filter(passesFilters).filter(t=>!state.selectedPRB||t.prb_id===state.selectedPRB); download('tickets_filtrado.csv', toCSV(data)); }
+    function exportPRB(){ const data=computePRBAggregate(); download('prbs_agregado.csv', toCSV(data)); }
+    function exportInc(){ const data=state.inconsistencias.map(x=>({prb_id:x.prb_id,datas:x.datas})); download('inconsistencias_prb.csv', toCSV(data)); }
+
+    // ======= UI =======
+    function switchTab(){
+      $$('.tab').forEach(b=>b.classList.remove('tab-active'));
+      $(`.tab[data-tab="${state.currentTab}"]`).classList.add('tab-active');
+      const ticketsMode=state.currentTab.startsWith('tickets');
+      $('#kpisTickets').classList.toggle('hidden',!ticketsMode);
+      $('#chartsTickets').classList.toggle('hidden',!ticketsMode);
+      $('#secTickets').classList.toggle('hidden',!ticketsMode);
+      const prbMode=state.currentTab==='prbs';
+      $('#kpisPRB').classList.toggle('hidden',!prbMode);
+      $('#secPRBs').classList.toggle('hidden',!prbMode);
+    
+    }
+    function populateStatusOptions(){
+      const set=new Set(state.tickets.map(t=>t.status).filter(Boolean));
+      const sel=$('#fStatus'); const cur=sel.value;
+      sel.innerHTML='<option value="">Todos</option>'+[...set].sort().map(v=>`<option>${v}</option>`).join('');
+      sel.value=cur||'';
+    }
+    function renderAll(){
+      switchTab();
+      populateStatusOptions();
+      populateEquipeOptions();   
+      refreshKPIs_Tickets();
+      refreshCharts();
+      renderTicketsTable();
+      if(state.currentTab==='prbs'){ refreshKPIs_PRB(); renderPRBTable(); }
+    }
+
+    function populateEquipeOptions() {
+  const sel = $('#fEquipe');
+  if (!sel) return;
+
+  // Coleta: "Suporte" + times de Produtos (owner_produto)
+  const teams = new Set();
+  let hasSuporte = false;
+
+  for (const t of state.tickets) {
+    if (t.owner === 'Suporte') hasSuporte = true;
+    if (t.owner === 'Produtos' && t.owner_produto) teams.add(t.owner_produto);
+  }
+
+  const cur = sel.value;
+  const optSuporte = hasSuporte ? ['<option value="Suporte">Suporte</option>'] : [];
+  const optTimes   = [...teams].sort().map(v => `<option>${v}</option>`);
+
+  sel.innerHTML = ['<option value="">Todas</option>']
+                  .concat(optSuporte)
+                  .concat(optTimes)
+                  .join('');
+
+  // mantém seleção, se ainda existir
+  const allowed = new Set(['', 'Suporte', ...teams]);
+  sel.value = allowed.has(cur) ? cur : '';
+}
+
+
+    // ======= Modelos =======
+    function modeloVinculos(){
+      const rows=[
+        {ticket_id:'111457',prb_id:'PRB-0001',data_previsao_correcao:'2025-09-30'},
+        {ticket_id:'111451',prb_id:'PRB-0002',data_previsao_correcao:''},
+        {ticket_id:'111317',prb_id:'PRB-0001',data_previsao_correcao:'2025-09-30'}
+      ];
+      return toCSV(rows,['ticket_id','prb_id','data_previsao_correcao']);
+    }
+
+    // ======= Init & Listeners =======
+    function init(){
+      lucide.createIcons();
+
+      // Tabs
+      $$('.tab').forEach(b=> b.addEventListener('click', ()=>{ state.currentTab=b.getAttribute('data-tab'); renderAll(); }));
+
+      // Filtros 
+      ['#fStatus'].forEach(sel=> $(sel).addEventListener('input', ()=>renderAll()));
+      $('#fEquipe')?.addEventListener('input', () => renderAll());
+
+      
+      
+
+      // Ações
+      $('#btnExportFiltrado').addEventListener('click', exportTickets);
+      $('#btnExportPRB').addEventListener('click', exportPRB);
+      $('#btnVerPRBs').addEventListener('click', ()=>{ state.currentTab='prbs'; renderAll(); });
+      $('#btnVerTickets').addEventListener('click', ()=>{ state.currentTab='tickets_todos'; renderAll(); });
+      $('#btnModeloVinculos').addEventListener('click', ()=> download('modelo_vinculos_prb.csv', modeloVinculos()));
+
+      // Import: Tickets CSV
+      $('#fileTickets').addEventListener('change', e=>{
+        const f=e.target.files[0]; if(!f) return;
+        decodeFileText(f, function(text){
+          Papa.parse(text,{
+            header:true, skipEmptyLines:true, complete:res=>{
+              // headers
+              const fieldsRaw = (res.meta && res.meta.fields) ? res.meta.fields : Object.keys(res.data[0]||{});
+              const fields = fieldsRaw.map(k => String(k).replace(/^\uFEFF/,'').replace(/\u00A0/g,' ').trim());
+              const norm2orig = {}; fields.forEach(k => norm2orig[_normKey(k)] = k);
+
+              // Data de solicitação 
+              const dateCol = norm2orig['data de solicitacao']
+                           || fields.find(k => { const n=_normKey(k); return n.startsWith('data') && (n.includes('solicit')||n.includes('abert')); });
+              if (dateCol) state.mapping.data_abertura = dateCol;
+
+              // Instituição Requerente 
+              let reqCol = norm2orig['instituicao requerente'];
+              if (!reqCol) reqCol = fields.find(k => { const n=_normKey(k); return n.includes('instituicao') && n.includes('requerent'); });
+              if (reqCol) state.mapping.requisitante = reqCol;
+
+              // PRAZO DE SLA
+               const slaCol = norm2orig['prazo de sla']
+              || fields.find(k => {
+              const n = _normKey(k);
+              return n.includes('prazo') && n.includes('sla');
+              });
+              if (slaCol) {
+              state.mapping.prazo_sla = slaCol;
+              } else {
+              console.warn('[sla] não achei "Prazo de SLA". Headers:', fields);
+}
+
+
+              // normaliza linhas
+              state.rawTickets = res.data.map(row => {
+                const o={}; for (const k in row) o[String(k).replace(/^\uFEFF/,'').replace(/\u00A0/g,' ').trim()] = row[k];
+                return o;
+              });
+
+              state.tickets = normalizeTickets(state.rawTickets, state.mapping, new Map());
+              renderAll();
+            }
+          });
+        });
+      });
+
+      // Import: Vínculos PRB CSV
+      $('#fileVinculos').addEventListener('change', e=>{
+        const f=e.target.files[0]; if(!f) return;
+        decodeFileText(f, function(text){
+          Papa.parse(text,{header:true,skipEmptyLines:true,complete:res=>{
+            state.rawLinks=res.data;
+            const {prbIndex,byTicket,inconsistencias}=buildPRBIndex(res.data);
+            state.prbIndex=prbIndex; state.inconsistencias=inconsistencias;
+            state.tickets=normalizeTickets(state.rawTickets,state.mapping,byTicket);
+            hydrateTicketsWithPRBDate(state.tickets,prbIndex);
+            renderAll();
+          }});
+        });
+      });
+    }
+    document.addEventListener('DOMContentLoaded', init);
+  </script>
+</body>
+</html>
